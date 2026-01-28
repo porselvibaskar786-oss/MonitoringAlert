@@ -1,4 +1,6 @@
 import streamlit as st
+import pandas as pd
+import requests
 from api_client import start_agent, stop_agent, simulate_incident, fetch_incidents
 # --------- ADDITIONAL IMPORTS (safe, no backend dependency) ----------
 from datetime import datetime
@@ -8,6 +10,110 @@ st.set_page_config(
     page_title="Agent Automation",
     layout="centered",  # 👈 important for login
 )
+
+def external_search_fallback(query):
+    return (
+        "🔍 I couldn’t find this in UI data or the vulnerability KB.\n\n"
+        "This will be fetched via Google / Web Search in the next phase.\n\n"
+        f"**Query:** {query}"
+    )
+
+@st.cache_data
+def load_vulnerability_kb(EXCEL_URL):
+    try:
+        df = pd.read_excel(EXCEL_URL)
+
+        # Normalize columns
+        df.columns = [c.lower() for c in df.columns]
+
+        return df
+    except Exception as e:
+        return None
+
+def chatbot_answer_engine(user_query, ui_context, vuln_df=None):
+    query = user_query.lower()
+
+    # -------- CERTIFICATES --------
+    if "certificate" in query:
+        certs = ui_context.get("certificates", [])
+
+        if not certs:
+            return "No certificate data found."
+
+        if "expired" in query:
+            expired = [c for c in certs if c.get("status") == "expired"]
+            return expired if expired else "No expired certificates."
+
+        if "renewed" in query or "valid" in query:
+            valid = [c for c in certs if c.get("status") == "valid"]
+            return valid if valid else "No valid certificates."
+
+        # fallback: show all certificates
+        return certs
+    
+    # -------- DEPLOYMENTS --------
+    if "deployment" in query or "server" in query:
+        return ui_context.get("deployments", "No deployment info available.")
+
+    # -------- DISK ISSUES --------
+    if "disk" in query or "space" in query:
+        return ui_context.get("disk_issues", "No disk issues recorded.")
+
+    # ---------- EXCEL KB LOOKUP ----------
+    if vuln_df is not None:
+        matches = vuln_df[
+            vuln_df.apply(
+                lambda row: query in str(row).lower(),
+                axis=1
+            )
+        ]
+
+        if not matches.empty:
+            return matches.head(3).to_dict(orient="records")
+
+    # -------- FALLBACK --------
+    return "NOT_FOUND"
+
+def format_bot_response(answer):
+    if isinstance(answer, str):
+        return answer
+
+    if isinstance(answer, list):
+        formatted = ""
+        for item in answer:
+            if "issue" in item:
+                formatted += (
+                    f"🛑 **Disk Space Alert**\n"
+                    f"- **Server:** {item.get('server')}\n"
+                    f"- **Time:** {item.get('date')}\n"
+                    f"- **Issue:** {item.get('issue')}\n"
+                    f"- **Steps:**\n"
+                )
+                for step in item.get("steps", []):
+                    formatted += f"  • {step}\n"
+                formatted += "\n"
+
+            elif "expiry" in item:
+                formatted += (
+                    f"🔐 **Certificate:** {item.get('name')}\n"
+                    f"- Status: {item.get('status')}\n"
+                    f"- Expiry: {item.get('expiry')}\n\n"
+                )
+
+            elif "version" in item:
+                formatted += (
+                    f"🚀 **Deployment**\n"
+                    f"- Server: {item.get('server')}\n"
+                    f"- Version: {item.get('version')}\n"
+                    f"- Time: {item.get('time')}\n\n"
+                )
+
+            else:
+                formatted += "🛡 **Vulnerability Info**\n"
+                for k, v in item.items():
+                    formatted += f"- {k}: {v}\n"
+        return formatted if formatted else "No relevant data found."
+    return str(answer)
 
 st.markdown("""
 <style>
@@ -111,7 +217,40 @@ def main_app():
         f"({st.session_state.access_level.upper()} access)"
     )
 
-    tabs = st.tabs(["Agent Console", "Live Feed &amp; Evidence"])
+   # ---------------- Excel Vulnerability KB ----------------
+    EXCEL_URL = "https://raw.githubusercontent.com/abhigyanpal1/sre-agent-kb-demo/main/CWE_Knowledge_Base.xlsx"
+
+    if "vuln_df" not in st.session_state:
+        st.session_state.vuln_df = load_vulnerability_kb(EXCEL_URL)
+
+
+
+    # ✅ ADD CENTRAL UI DATA STORE HERE 
+    if "ui_state" not in st.session_state:
+        st.session_state.ui_state = {
+            "certificates": [
+                {"name": "ui-cert", "status": "valid", "expiry": "2026-01-10"},
+                {"name": "api-cert", "status": "expired", "expiry": "2025-01-01"}
+            ],
+            "deployments": [
+                {"server": "prod-server-1", "version": "1.0.3", "time": "2026-01-20"}
+            ],
+            "disk_issues": [
+                {
+                    "server": "prod-server-1",
+                    "date": "2026-01-22 14:30",
+                    "issue": "Disk usage 92%",
+                    "steps": [
+                        "Check /var/log size",
+                        "Rotate logs",
+                        "Clean temp files"
+                    ]
+                }
+            ]
+        }
+
+
+    tabs = st.tabs(["Agent Console", "Live Feed & Evidence", " Ops Chatbot"])
 
     # ---------------- Agent Console ----------------
     with tabs[0]:
@@ -566,6 +705,7 @@ def main_app():
 
         try:
             incidents = fetch_incidents()
+            st.session_state.ui_context["incidents"] = incidents
         except Exception as e:
             st.warning("⚠ Backend not running. Showing empty incident list.")
             incidents = []
@@ -730,6 +870,70 @@ def main_app():
             st.code("deployment.version: 1.0.0", language="text")
         # ===================== END ADD-ON =====================
 
+    with tabs[2]:
+        st.header("💬 Ops Chatbot")
+        user_query = st.text_input(
+            "Ask me anything about ops:",
+            placeholder="e.g. Which certificates are expired?"
+        )
+        # Initialize chat history once
+        if "chat_history" not in st.session_state:
+            st.session_state.chat_history = []
+        # if user_query:
+        #     answer = chatbot_answer_engine(
+        #         user_query,
+        #         st.session_state.ui_state,
+        #         vuln_df
+        #     )
+
+        #     if answer != "NOT_FOUND":
+        #         st.write(answer)
+        #     else:
+        #         # 🌐 GOOGLE / EXTERNAL FALLBACK GOES HERE
+        #         external_answer = external_search_fallback(user_query)
+        #         st.info(external_answer)
+        if st.button("Ask") and user_query.strip():
+            # Store user message
+            st.session_state.chat_history.append(
+                {"role": "user", "content": user_query}
+            )
+
+            # # Get answer
+            # answer = chatbot_answer_engine(
+            #     user_query,
+            #     st.session_state.ui_state,
+            #     st.session_state.vuln_df
+            # )
+
+            # if answer == "NOT_FOUND":
+            #     answer = external_search_fallback(user_query)
+
+            # # Store bot response
+            # st.session_state.chat_history.append(
+            #     {"role": "assistant", "content": answer}
+            # )
+            raw_answer = chatbot_answer_engine(
+                user_query,
+                st.session_state.ui_state,
+                st.session_state.vuln_df
+            )
+
+            if raw_answer == "NOT_FOUND":
+                raw_answer = external_search_fallback(user_query)
+
+            formatted_answer = format_bot_response(raw_answer)
+
+            st.session_state.chat_history.append(
+                {"role": "assistant", "content": formatted_answer}
+            )
+
+
+        # -------- Render Chat --------
+        for msg in st.session_state.chat_history:
+            if msg["role"] == "user":
+                st.markdown(f"**🧑 You:** {msg['content']}")
+            else:
+                st.markdown(f"**🤖 Bot:** {msg['content']}")
 
 if not st.session_state.logged_in:
     login_page()
