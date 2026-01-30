@@ -19,13 +19,19 @@ jobs:
           username: ubuntu  # Change to your EC2 username, e.g., ec2-user for Amazon Linux
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            cd /home/ubuntu/MonitoringAlert  # Adjust to your app directory
+            sudo apt update
+            sudo apt install -y python3-venv git unzip
+            cd /home/ubuntu
+            if [ ! -d "MonitoringAlert" ]; then
+              git clone https://github.com/porselvibaskar786-oss/MonitoringAlert.git
+            fi
+            cd MonitoringAlert
             git pull origin main
             python3 -m venv venv
             source venv/bin/activate
             pip install -r backend/requirements.txt
-            # Create .env if not exists
+            # Create .env
             echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" > backend/.env
-            # Restart service (adjust for your setup)
+            # Restart service
             pkill -f uvicorn || true
             nohup uvicorn backend.main:app --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
