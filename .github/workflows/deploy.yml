@@ -15,7 +15,7 @@ jobs:
       - name: Deploy to EC2
         uses: appleboy/ssh-action@master
         with:
-          host: 34.219.134.92
+          host: 18.237.102.97
           username: ubuntu  # Change to your EC2 username, e.g., ec2-user for Amazon Linux
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |

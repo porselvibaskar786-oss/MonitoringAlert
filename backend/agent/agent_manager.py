@@ -45,10 +45,10 @@ def simulate_incident():
 
     # Check HTTP endpoints
     endpoints = [
-        "http://34.219.134.92:9081/users",
-        "http://34.219.134.92:9082/orders",
-        "http://34.219.134.92:9083/products",
-        "http://34.219.134.92:9084/notifications"
+        "http://18.237.102.97:9081/users",
+        "http://18.237.102.97:9082/orders",
+        "http://18.237.102.97:9083/products",
+        "http://18.237.102.97:9084/notifications"
     ]
     http_incidents = monitor_endpoints(endpoints)
     for inc in http_incidents:
