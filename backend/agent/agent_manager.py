@@ -1,9 +1,9 @@
 from datetime import datetime
-from services.storage import INCIDENTS, AGENT_RUNNING
-from agent.detector import detect_cpu_issue
-from agent.remediator import remediate
-from agent.notifier import send_email
-from monitors.http_monitors import monitor_endpoints
+from ..services.storage import INCIDENTS, AGENT_RUNNING
+from .detector import detect_cpu_issue
+from .remediator import remediate
+from .notifier import send_email
+from ..monitors.http_monitors import monitor_endpoints
 import requests
 import os
 

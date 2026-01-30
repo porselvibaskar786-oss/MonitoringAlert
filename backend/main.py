@@ -1,6 +1,6 @@
 from fastapi import FastAPI
-from agent.agent_manager import start_agent, stop_agent, simulate_incident
-from services.storage import INCIDENTS
+from .agent.agent_manager import start_agent, stop_agent, simulate_incident
+from .services.storage import INCIDENTS
 
 app = FastAPI(title="Agent Automation API")
 
