@@ -1,0 +1,31 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@master
+        with:
+          host: 34.219.134.92
+          username: ubuntu  # Change to your EC2 username, e.g., ec2-user for Amazon Linux
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /home/ubuntu/MonitoringAlert  # Adjust to your app directory
+            git pull origin main
+            python3 -m venv venv
+            source venv/bin/activate
+            pip install -r backend/requirements.txt
+            # Create .env if not exists
+            echo "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" > backend/.env
+            # Restart service (adjust for your setup)
+            pkill -f uvicorn || true
+            nohup uvicorn backend.main:app --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
